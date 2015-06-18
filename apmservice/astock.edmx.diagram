@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="3.0" xmlns:edmx="http://schemas.microsoft.com/ado/2009/11/edmx">
+ <!-- EF Designer content (DO NOT EDIT MANUALLY BELOW HERE) -->
+  <edmx:Designer xmlns="http://schemas.microsoft.com/ado/2009/11/edmx">
+    <!-- Diagram content (shape and connector positions) -->
+    <edmx:Diagrams>
+      <Diagram DiagramId="8fcf8ab37ec84b179b84b324d1088456" Name="Diagram1">
+        <EntityTypeShape EntityType="astockModel.STK_MKT_ConsolidatedReturn" Width="1.5" PointX="5.75" PointY="0.75" IsExpanded="true" />
+        <EntityTypeShape EntityType="astockModel.STK_MKT_DeriativeTradingIndexDaily" Width="1.5" PointX="3" PointY="1.75" IsExpanded="true" />
+        <EntityTypeShape EntityType="astockModel.STK_MKT_IndexDaily" Width="1.5" PointX="5.75" PointY="5.75" IsExpanded="true" />
+        <EntityTypeShape EntityType="astockModel.STK_MKT_PortfolioBase" Width="1.5" PointX="3" PointY="6.625" IsExpanded="true" />
+        <EntityTypeShape EntityType="astockModel.STK_MKT_RiskFactorDaily" Width="1.5" PointX="3" PointY="11.25" IsExpanded="true" />
+        <EntityTypeShape EntityType="astockModel.STK_MKT_TradeDaily" Width="1.5" PointX="3" PointY="16.375" IsExpanded="true" />
+        <EntityTypeShape EntityType="astockModel.TRD_Co" Width="1.5" PointX="0.75" PointY="7.75" IsExpanded="true" />
+        <AssociationConnector Association="astockModel.FK_STK_MKT_DeriativeTradingIndexDaily_TRD_Co" ManuallyRouted="false" />
+        <AssociationConnector Association="astockModel.FK_STK_MKT_PortfolioBase_TRD_Co" ManuallyRouted="false" />
+        <AssociationConnector Association="astockModel.FK_STK_MKT_RiskFactorDaily_TRD_Co" ManuallyRouted="false" />
+        <AssociationConnector Association="astockModel.FK_STK_MKT_TradeDaily_TRD_Co" ManuallyRouted="false" />
+        <EntityTypeShape EntityType="astockModel.TRD_Co_Quarter_ProfitIndex" Width="1.5" PointX="8.375" PointY="0.75" />
+      </Diagram>
+    </edmx:Diagrams>
+  </edmx:Designer>
+</edmx:Edmx>
