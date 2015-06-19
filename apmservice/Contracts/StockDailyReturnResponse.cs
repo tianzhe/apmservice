@@ -56,5 +56,28 @@ namespace apmservice.Contracts
         [DataMember(Name = "perShareDivRatio")]
         public double PerShareDividendRatio { get; set; }
 
+        [DataMember(Name = "perShareTransRatio")]
+        public double PerShareTransformRatio { get; set; }
+
+        [DataMember(Name = "perCashDiv")]
+        public double PerShareCashDividentPreTax { get; set; }
+
+        [DataMember(Name = "allotmentRatio")]
+        public double PerShareAllotmentRatio { get; set; }
+
+        [DataMember(Name = "allotmentPrice")]
+        public double PriceAllotment { get; set; }
+
+        [DataMember(Name = "splitsRatio")]
+        public double StockSplitRatio { get; set; }
+
+        [DataMember(Name = "dailyReturnReinv")]
+        public double ReturnRateReinvest { get; set; }
+
+        [DataMember(Name = "dailyReturnNoReinv")]
+        public double ReturnRateNonReinvest { get; set; }
+
+        [DataMember(Name="isChgPctl")]
+        public Int16 IsFluctuationLimitControlled { get; set; }
     }
 }

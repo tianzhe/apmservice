@@ -55,6 +55,8 @@ namespace apmservice
             }
             _astock = new astockEntities();
 
+            Util.Initialize(_token, _baseUrl, eventLog1);
+
             Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
             syncMktIdxDataThread.Start();
             //_syncMktIdxDataTimer = new System.Timers.Timer(_syncmktIdxDataInterval);
@@ -85,6 +87,28 @@ namespace apmservice
         {
             lock (_mktIdxDatalock)
             {
+                foreach(var idx in MarketIndexType)
+                {
+                    var existingData =
+                        _astock.STK_MKT_IndexDaily
+                        .Where(a => a.IndexID.Equals(idx, StringComparison.InvariantCultureIgnoreCase))
+                        .Select(a => a.TradingDate2).OrderByDescending(a => a).ToList();
+
+                    if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
+                    {
+                        continue;
+                    }
+
+                    DateTime nextDay = 
+                        existingData.Count == 0 ?
+                            _defaultStartDate :
+                            ((DateTime)existingData.ElementAt(0)).AddDays(1);
+
+                    if(!Util.SyncMarketIndexDailyData(idx, nextDay, null))
+                    {
+                        continue;
+                    }
+                }
             }
         }
 
@@ -92,7 +116,6 @@ namespace apmservice
         {
             lock(_tradeDataLock)
             {
-                Util.Initialize(_token, _baseUrl, eventLog1);
                 var firms = _astock.TRD_Co.Select(a => a.StockId).OrderBy(a => a).ToList();
                 foreach (var firm in firms)
                 {
@@ -141,6 +164,17 @@ namespace apmservice
         private static object _mktIdxDatalock = new object();
         private static object _tradeDataLock = new object();
         private DateTime _defaultStartDate = DateTime.Parse("2012-01-01");
+
+        private static string[] MarketIndexType = 
+            new string[] 
+            { 
+                "000002",   // 
+                "000003",   //
+                "399005",   //
+                "399006",   //
+                "399107",   //
+                "399108"    //
+            };
 
         //private static Dictionary<string, double> StockId2MarketTypeMap = new Dictionary<string, double>()
         //{

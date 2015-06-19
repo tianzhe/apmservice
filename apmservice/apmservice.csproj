@@ -140,6 +140,8 @@
     </Compile>
     <Compile Include="Contracts\BaseResponse.cs" />
     <Compile Include="Contracts\ErrorResponse.cs" />
+    <Compile Include="Contracts\MarketIndexRequest.cs" />
+    <Compile Include="Contracts\MarketIndexResponse.cs" />
     <Compile Include="Contracts\SecureIdRequest.cs" />
     <Compile Include="Contracts\SecureIdResponse.cs" />
     <Compile Include="Contracts\StockDailyReturnRequest.cs" />

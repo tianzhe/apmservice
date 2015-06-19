@@ -24,11 +24,44 @@ namespace apmservice
             NON_REINVEST
         }
 
+        public static Dictionary<string, string> AssetClass = new Dictionary<string, string>()
+        {
+            { "EQUITY","E" },
+            { "BOND", "B" },
+            { "FUND", "F"} ,
+            { "INDEX", "IDX"} ,
+            { "FUTURE", "FU" },
+            { "OPTION", "OP" }
+        };
+
         public static void Initialize(string token, string baseUrl, EventLog eventlog)
         {
             _token = token;
             _baseUrl = baseUrl;
             _eventLog = eventlog;
+        }
+
+        private static void CheckReturnCode(int code)
+        {
+            switch(code)
+            {
+                case 1:     // Success
+                    break;
+                case -1:    // Data is not available
+                    break;
+                case -2:    // Invalid parameter
+                    break;
+                case -3:    // Server suspended
+                    break;
+                case -4:    // Server error
+                    break;
+                case -5:    // Server busy
+                    break;
+                default:
+                    _eventLog.WriteEntry(
+                        string.Format("Invalid return code captured : {0}", code));
+                    break;
+            }
         }
 
         private static double GetMarketType(string stockId)
@@ -55,6 +88,148 @@ namespace apmservice
             }
         }
 
+        public static bool SyncMarketIndexDailyData(string idx, DateTime startDate, DateTime? endDate)
+        {
+            if (endDate != null && startDate >= endDate)
+            {
+                return false;
+            }
+
+            try
+            {
+                MarketIndexResponse jsonResponse = null;
+
+                var payload = endDate == null ?
+                        new MarketIndexRequest
+                        {
+                            IndexTradeId = idx,
+                            Field = string.Empty,
+                            QueryStartDate = startDate.ToString("yyyyMMdd")
+                        } :
+                        new MarketIndexRequest
+                        {
+                            IndexTradeId = idx,
+                            Field = string.Empty,
+                            QueryStartDate = startDate.ToString("yyyyMMdd"),
+                            QueryEndDate = ((DateTime)endDate).ToString("yyyyMMdd")
+                        };
+
+                var request = endDate == null ?
+                    (HttpWebRequest)WebRequest.Create(
+                        string.Format(
+                            "{0}/api/market/getMktIdxd.json?ticker={1}&beginDate={2}&field={3}",
+                            _baseUrl, payload.IndexTradeId, payload.QueryStartDate, payload.Field)) :
+                    (HttpWebRequest)WebRequest.Create(
+                        string.Format(
+                            "{0}/api/market/getMktIdxd.json?ticker={1}&beginDate={2}&endDate={3}&field={4}",
+                            _baseUrl, payload.IndexTradeId, payload.QueryStartDate, payload.QueryEndDate, payload.Field));
+
+                request.Method = "GET";
+                request.Headers.Add("Authorization: Bearer " + _token);
+                var response = (HttpWebResponse)request.GetResponse();
+
+                using (Stream stream = response.GetResponseStream())
+                {
+                    if (stream == null)
+                    {
+                        return false;
+                    }
+
+                    Encoding encoding = 
+                        string.IsNullOrEmpty(response.CharacterSet) ?
+                            Encoding.Default : 
+                            Encoding.GetEncoding(response.CharacterSet);
+
+                    using (var reader = new StreamReader(stream, encoding))
+                    {
+                        var result = reader.ReadToEnd();
+                        jsonResponse = JsonConvert.DeserializeObject<MarketIndexResponse>(result);
+                        if (jsonResponse.ReturnCode != 1)
+                        {
+                            var error = JsonConvert.DeserializeObject<ErrorResponse>(result);
+                            _eventLog.WriteEntry(
+                                string.Format(
+                                    "Unexpected error encountered when attempting to get the market index data for Index ID {0}.\nError = {1}",
+                                    idx, error.ReturnMessage), EventLogEntryType.Error);
+
+                            return false;
+                        }
+                    }
+                }
+
+                if (jsonResponse == null)
+                {
+                    return false;
+                }
+
+                var toBeInserted = jsonResponse.Payload.Select(a =>
+                    new
+                    {
+                        a.IndexTradeId,
+                        a.TradeDate,
+                        a.OpenIndex,
+                        a.HighIndex,
+                        a.LowIndex,
+                        a.CloseIndex,
+                        a.TurnoverVolume,
+                        a.TurnoverValue,
+                        a.PreviousCloseIndex,
+                        TradeDateConverted = DateTime.Parse(a.TradeDate)
+                    })
+                    .OrderBy(b => b.TradeDateConverted).ToList();
+
+                foreach (var trade in toBeInserted)
+                {
+                    var newRecord = new STK_MKT_IndexDaily
+                    {
+                        IndexID = trade.IndexTradeId,
+                        TradingDate = trade.TradeDate,
+                        OpenIndex = trade.OpenIndex,
+                        HighIndex = trade.HighIndex,
+                        LowIndex = trade.LowIndex,
+                        CloseIndex = trade.CloseIndex,
+                        ConstituentStockTradeVolume = trade.TurnoverVolume,
+                        ConstituentStockTradeAmount = trade.TurnoverValue,
+                        IndexReturnRate = 
+                            trade.PreviousCloseIndex == 0 ?
+                                0 :
+                                ( trade.CloseIndex / trade.PreviousCloseIndex ) - 1,
+                        UniqueID = Guid.NewGuid(),
+                        TradingDate2 = trade.TradeDateConverted
+                    };
+#if(!DEBUG)
+                    _astock.STK_MKT_IndexDaily.Add(newRecord);
+#endif
+                }
+#if(!DEBUG)
+                _astock.SaveChanges();
+#endif
+                _eventLog.WriteEntry(
+                    string.Format("Successfully inserted {0} index trade data records to database for Index ID {1}",
+                    toBeInserted.Count, idx), EventLogEntryType.Information);
+            }
+            catch (Exception ex)
+            {
+                _eventLog.WriteEntry(
+                    string.Format(
+                        "Unexpected error occurred.\nDetails = {0}\nStack Trace = {1}",
+                        ex.Message, ex.StackTrace), EventLogEntryType.Error);
+
+                if (ex.InnerException != null)
+                {
+                    _eventLog.WriteEntry(
+                        string.Format(
+                            "Inner Exception Message = {0}\nStack Trace = {1}",
+                            ex.InnerException.Message, ex.InnerException.StackTrace),
+                            EventLogEntryType.Error);
+                }
+
+                return false;
+            }
+
+            return true;
+        }
+
         public static Dictionary<DateTime, double> GetReturnRate(string secureId, string stockId, DateTime startDate, DateTime? endDate, ReturnRateType type)
         {
             if (endDate != null && startDate >= endDate)
@@ -67,13 +242,15 @@ namespace apmservice
                     new StockDailyReturnRequest
                     {
                         SecureId = secureId,
-                        QueryStartDate = startDate.ToString("yyyyMMdd")
+                        QueryStartDate = startDate.ToString("yyyyMMdd"),
+                        Field = string.Empty
                     } :
                     new StockDailyReturnRequest
                     {
                         SecureId = secureId,
                         QueryStartDate = startDate.ToString("yyyyMMdd"),
-                        QueryEndDate = ((DateTime)endDate).ToString("yyyyMMdd")
+                        QueryEndDate = ((DateTime)endDate).ToString("yyyyMMdd"),
+                        Field = string.Empty
                     };
 
             try 
@@ -81,12 +258,12 @@ namespace apmservice
                 var request = endDate == null ?
                     (HttpWebRequest)WebRequest.Create(
                         string.Format(
-                            "{0}/ap/api/equity/getEquRetud.json?field=&ticker=000001&secID=&beginDate=&endDate=&dailyReturnNoReinvLower=&dailyReturnNoReinvUpper=&dailyReturnReinvLower=&dailyReturnReinvUpper=&isChgPctl=&listStatusCD=",
-                            _baseUrl, payload.SecureId, payload.QueryStartDate)) :
+                            "{0}/api/equity/getEquRetud.json?secID={1}&beginDate={2}&field={3}",
+                            _baseUrl, payload.SecureId, payload.QueryStartDate, payload.Field)) :
                     (HttpWebRequest)WebRequest.Create(
                         string.Format(
-                            "{0}/api/market/getMktEqud.json?secID={1}&beginDate={2}&endDate={3}",
-                            _baseUrl, payload.SecureId, payload.QueryStartDate, payload.QueryEndDate));
+                            "{0}/api/equity/getEquRetud.json?secID={1}&beginDate={2}&endDate={3}&field={4}",
+                            _baseUrl, payload.SecureId, payload.QueryStartDate, payload.QueryEndDate, payload.Field));
 
                 request.Method = "GET";
                 request.Headers.Add("Authorization: Bearer " + _token);
@@ -126,14 +303,14 @@ namespace apmservice
                     case ReturnRateType.NON_REINVEST:
                         foreach(var rate in jsonResponse.Payload)
                         {
-                            ret.Add();
+                            ret.Add(DateTime.Parse(rate.TradeDate), rate.ReturnRateNonReinvest);
                         }
                         return ret;
 
                     case ReturnRateType.REINVEST:
                         foreach(var rate in jsonResponse.Payload)
                         {
-                            ret.Add();
+                            ret.Add(DateTime.Parse(rate.TradeDate), rate.ReturnRateReinvest);
                         }
                         return ret;
 
@@ -370,13 +547,18 @@ namespace apmservice
 
         public static string GetSecureId(string stockId)
         {
+            if(string.IsNullOrEmpty(stockId))
+            {
+                return string.Empty;
+            }
+
             string secureId = string.Empty;
             
             try
             {
                 var payload = new SecureIdRequest
                 {
-                    AssetClass = "E",
+                    AssetClass = AssetClass["EQUITY"],
                     StockId = stockId,
                     Field = string.Empty
                 };
