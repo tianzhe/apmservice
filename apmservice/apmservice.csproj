@@ -148,6 +148,7 @@
     <Compile Include="Contracts\StockDailyReturnResponse.cs" />
     <Compile Include="Contracts\TradeDailyRequest.cs" />
     <Compile Include="Contracts\TradeDailyResponse.cs" />
+    <Compile Include="Events\ModelGenerateEvent.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="ProjectInstaller.cs">
       <SubType>Component</SubType>
@@ -156,6 +157,7 @@
       <DependentUpon>ProjectInstaller.cs</DependentUpon>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Proxy.cs" />
     <Compile Include="STK_MKT_ConsolidatedReturn.cs">
       <DependentUpon>astock.tt</DependentUpon>
     </Compile>

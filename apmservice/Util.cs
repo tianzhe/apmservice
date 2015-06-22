@@ -460,22 +460,32 @@ namespace apmservice
                 {
                     //var returnRateNonReinvest = trade.ClosePrice / trade.PreviousClosePrice - 1;
                     //var returnRateReinvest = returnRateNonReinvest;
+                    Dictionary<DateTime, double> results = null;
+                    double? returnRateNonReinvest = null;
+                    double? returnRateReinvest = null;
 
-                    var returnRateNonReinvest = 
-                        GetReturnRate(
-                            secureId, 
-                            trade.StockId, 
-                            DateTime.Parse(trade.TradeDate), 
-                            null, 
-                            ReturnRateType.NON_REINVEST)[DateTime.Parse(trade.TradeDate)];
+                    results = GetReturnRate(
+                        secureId,
+                        trade.StockId,
+                        DateTime.Parse(trade.TradeDate),
+                        null,
+                        ReturnRateType.NON_REINVEST);
 
-                    var returnRateReinvest = 
-                        GetReturnRate(
-                            secureId, 
-                            trade.StockId, 
-                            DateTime.Parse(trade.TradeDate), 
-                            null, 
-                            ReturnRateType.REINVEST)[DateTime.Parse(trade.TradeDate)];
+                    if(results != null)
+                    {
+                        returnRateNonReinvest = results[DateTime.Parse(trade.TradeDate)];
+                    }
+                   
+                    results = GetReturnRate(
+                        secureId,
+                        trade.StockId,
+                        DateTime.Parse(trade.TradeDate),
+                        null,
+                        ReturnRateType.REINVEST);
+                    if(results != null)
+                    {
+                        returnRateReinvest = results[DateTime.Parse(trade.TradeDate)];
+                    }
 
                     var curClosePriceComparableNonReinvest =
                         prevClosePriceComparableNonReinvest == null ?

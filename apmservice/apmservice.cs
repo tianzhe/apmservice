@@ -15,6 +15,8 @@ using Newtonsoft.Json.Serialization;
 using apmservice.Contracts;
 using System.Timers;
 using Microsoft.Win32;
+using System.Reflection;
+using apmservice.Events;
 
 namespace apmservice
 {
@@ -33,16 +35,24 @@ namespace apmservice
          */
         protected override void OnStart(string[] args)
         {
+//#if(DEBUG)
+//            Debugger.Launch();
+//#endif
             // Read registry key and values
+            RegistryKey key = null;
+            string imagePath = string.Empty;
             try
             {
-                RegistryKey key = Registry.LocalMachine.OpenSubKey(
+                key = Registry.LocalMachine.OpenSubKey(
                     "SYSTEM\\CurrentControlSet\\Services\\Active Portfolio Management");
                 
                 _token = key.GetValue("DataYesToken").ToString();
                 _baseUrl = key.GetValue("DataYesBaseUrl").ToString();
                 _syncmktIdxDataInterval = UInt64.Parse(key.GetValue("SyncMarketIndexDataInterval").ToString());
                 _syncTradeDataInterval = UInt64.Parse(key.GetValue("SyncTradeDataInterval").ToString());
+                _defaultStartDate = DateTime.Parse(key.GetValue("DefaultQueryStartDate").ToString());
+                _providers = (string[])key.GetValue("ProviderNames");
+                imagePath = key.GetValue("ImagePath").ToString().TrimEnd('"').TrimStart('"');
             }
             catch(Exception ex)
             {
@@ -51,20 +61,84 @@ namespace apmservice
                         "Unexpected error encountered when attempting to read the registry @ {0}.\nDetails = {1}", 
                         "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Active Portfolio Management", ex.Message), 
                         EventLogEntryType.Error);
+                if(key != null)
+                {
+                    key.Close();
+                }
                 throw;
             }
-            _astock = new astockEntities();
-
+            
+            // Initialize
             Util.Initialize(_token, _baseUrl, eventLog1);
 
+            // Set timer for market index data synchronization
             Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
             syncMktIdxDataThread.Start();
-            //_syncMktIdxDataTimer = new System.Timers.Timer(_syncmktIdxDataInterval);
-            //_syncMktIdxDataTimer.Elapsed += _syncMktIdxDataTimer_Elapsed;
-            //_syncMktIdxDataTimer.Start();
-
+            
+            // Set timer for trade data synchronization
             Thread syncTradeDataThread = new Thread(new ThreadStart(KickOffSyncTradeData));
             syncTradeDataThread.Start();
+
+            // Load module dlls
+            if(_providers.Count() > 0)
+            {
+                foreach(var provider in _providers.Where(a => !string.IsNullOrEmpty(a)))
+                {
+                    RegistryKey subKey = null;
+                    try
+                    {
+                        subKey = key.OpenSubKey(provider, true);
+                        if (subKey != null)
+                        {
+                            var IsCritical = UInt32.Parse(subKey.GetValue("IsCritical").ToString());
+                            if (IsCritical > 0)
+                            {
+                                var modulePath = subKey.GetValue("ModulePath").ToString();
+                                modulePath = modulePath.TrimStart('\"').TrimEnd('\"');
+
+                                // Initialize
+                                Assembly assembly = Assembly.LoadFile(modulePath);
+                                var nameSpace = provider;
+                                var className = "Model";
+                                var fqdn = nameSpace + '.' + className;
+                                var types = assembly.GetTypes().ToList();
+                                var type = types.Where(t => t.Name.Equals("Model", StringComparison.InvariantCultureIgnoreCase)).FirstOrDefault();
+                                var method = type.GetMethod("Initialize");
+                                Object obj = Activator.CreateInstance(type);
+                                method.Invoke(obj, new object[]{subKey, eventLog1});
+
+                                // Register the callback
+                                var domain = AppDomain.CreateDomain(provider);
+                                var instance = (Proxy)domain.CreateInstanceFromAndUnwrap(imagePath, "apmservice.Proxy");
+                                instance.LoadAssemlyFromFile(modulePath);
+                                GeneratePortfolio += instance.Invoke;
+                                domains.Add(domain);
+                            }
+                        }
+                    }
+                    catch(Exception ex)
+                    {
+                        eventLog1.WriteEntry(
+                            string.Format(
+                                "Unexpected error encountered when attempting to load the module dlls {0}.\nDetails = {1}",
+                                provider, ex.Message),
+                                EventLogEntryType.Error);
+                        throw;
+                    }
+                    finally
+                    {
+                        if(subKey != null)
+                        {
+                            subKey.Close();
+                        }
+
+                        if(key != null)
+                        {
+                            key.Close();
+                        }
+                    }
+                }
+            }
 
             eventLog1.WriteEntry("Active Portfolio Management Service Started!", EventLogEntryType.Information);
         }
@@ -87,6 +161,7 @@ namespace apmservice
         {
             lock (_mktIdxDatalock)
             {
+                var _astock = new astockEntities();
                 foreach(var idx in MarketIndexType)
                 {
                     var existingData =
@@ -109,6 +184,16 @@ namespace apmservice
                         continue;
                     }
                 }
+
+                ModelGenerateEvent.ModelGenerateEventArgs args =
+                    new ModelGenerateEvent.ModelGenerateEventArgs
+                    {
+                        MethodName = "Generate",
+                        ClassName = "Model",
+                        InvokeArgs = null
+                    };
+
+                GeneratePortfolio.BeginInvoke(this, args, null, null);
             }
         }
 
@@ -116,6 +201,7 @@ namespace apmservice
         {
             lock(_tradeDataLock)
             {
+                var _astock = new astockEntities();
                 var firms = _astock.TRD_Co.Select(a => a.StockId).OrderBy(a => a).ToList();
                 foreach (var firm in firms)
                 {
@@ -150,10 +236,13 @@ namespace apmservice
 
         protected override void OnStop()
         {
+            foreach(var domain in domains)
+            {
+                AppDomain.Unload(domain);
+            }
             eventLog1.WriteEntry("Active Portfolio Management Service Stopped!", EventLogEntryType.Information);
         }
 
-        private static astockEntities _astock;
         private static System.Timers.Timer _syncMktIdxDataTimer;
         private static System.Timers.Timer _syncTradeDataTimer;
 
@@ -161,19 +250,22 @@ namespace apmservice
         private string _baseUrl;
         private UInt64 _syncmktIdxDataInterval;
         private UInt64 _syncTradeDataInterval;
+        private DateTime _defaultStartDate;
+        private string[] _providers;
+        private event ModelGenerateEvent.ModelGenerateEventHandler GeneratePortfolio;
+        private static List<AppDomain> domains = new List<AppDomain>();
         private static object _mktIdxDatalock = new object();
         private static object _tradeDataLock = new object();
-        private DateTime _defaultStartDate = DateTime.Parse("2012-01-01");
 
         private static string[] MarketIndexType = 
             new string[] 
             { 
-                "000002",   // 
-                "000003",   //
-                "399005",   //
-                "399006",   //
-                "399107",   //
-                "399108"    //
+                "000002",   // Shanghai A Stock Index
+                "000003",   // Shanghai B Stock Index
+                "399005",   // Consolidated MSB Stock Index
+                "399006",   // Consolidated GEMB Stock Index
+                "399107",   // Consolidated Shenzhen A Stock Index
+                "399108"    // Consolidated Shenzhen B Stock Index
             };
 
         //private static Dictionary<string, double> StockId2MarketTypeMap = new Dictionary<string, double>()
