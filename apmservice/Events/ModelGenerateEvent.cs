@@ -16,6 +16,6 @@ namespace apmservice.Events
             public Object[] InvokeArgs { get; set; }
         }
 
-        public delegate void ModelGenerateEventHandler(object sender, ModelGenerateEventArgs e);
+        public delegate bool ModelGenerateEventHandler(object sender, ModelGenerateEventArgs e);
     }
 }

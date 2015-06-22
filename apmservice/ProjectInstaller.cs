@@ -34,8 +34,9 @@ namespace apmservice
 
                 key.SetValue("DataYesBaseUrl", "https://api.wmcloud.com:443/data", RegistryValueKind.String);
 
-                key.SetValue("SyncMarketIndexDataInterval", 15000, RegistryValueKind.QWord);
-                key.SetValue("SyncTradeDataInterval", 15000, RegistryValueKind.QWord);
+                key.SetValue("SyncMarketIndexDataInterval", "00:00:15", RegistryValueKind.String);
+                key.SetValue("SyncTradeDataInterval", "00:00:15", RegistryValueKind.String);
+                key.SetValue("GeneratePortfolioInterval", "00:00:15", RegistryValueKind.String);
                 key.SetValue("DefaultQueryStartDate", "2012-01-01", RegistryValueKind.String);
                 key.SetValue("ProviderNames", new string[]{}, RegistryValueKind.MultiString);
             }

@@ -48,11 +48,12 @@ namespace apmservice
                 
                 _token = key.GetValue("DataYesToken").ToString();
                 _baseUrl = key.GetValue("DataYesBaseUrl").ToString();
-                _syncmktIdxDataInterval = UInt64.Parse(key.GetValue("SyncMarketIndexDataInterval").ToString());
-                _syncTradeDataInterval = UInt64.Parse(key.GetValue("SyncTradeDataInterval").ToString());
+                _syncmktIdxDataInterval = TimeSpan.Parse(key.GetValue("SyncMarketIndexDataInterval").ToString()).TotalMilliseconds;
+                _syncTradeDataInterval = TimeSpan.Parse(key.GetValue("SyncTradeDataInterval").ToString()).TotalMilliseconds;
+                _genPortfolioInterval = TimeSpan.Parse(key.GetValue("GeneratePortfolioInterval").ToString()).TotalMilliseconds;
                 _defaultStartDate = DateTime.Parse(key.GetValue("DefaultQueryStartDate").ToString());
                 _providers = (string[])key.GetValue("ProviderNames");
-                imagePath = key.GetValue("ImagePath").ToString().TrimEnd('"').TrimStart('"');
+                imagePath = key.GetValue("ImagePath").ToString().TrimEnd('\"').TrimStart('\"');
             }
             catch(Exception ex)
             {
@@ -70,14 +71,6 @@ namespace apmservice
             
             // Initialize
             Util.Initialize(_token, _baseUrl, eventLog1);
-
-            // Set timer for market index data synchronization
-            Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
-            syncMktIdxDataThread.Start();
-            
-            // Set timer for trade data synchronization
-            Thread syncTradeDataThread = new Thread(new ThreadStart(KickOffSyncTradeData));
-            syncTradeDataThread.Start();
 
             // Load module dlls
             if(_providers.Count() > 0)
@@ -98,12 +91,33 @@ namespace apmservice
 
                                 // Initialize
                                 Assembly assembly = Assembly.LoadFile(modulePath);
-                                var nameSpace = provider;
-                                var className = "Model";
-                                var fqdn = nameSpace + '.' + className;
+                                if(assembly == null)
+                                {
+                                    throw new ApplicationException(
+                                        string.Format("Unable to load the assembly from the path {0}", modulePath));
+                                }
                                 var types = assembly.GetTypes().ToList();
-                                var type = types.Where(t => t.Name.Equals("Model", StringComparison.InvariantCultureIgnoreCase)).FirstOrDefault();
+                                if(types.Count == 0)
+                                {
+                                    throw new ApplicationException(
+                                        string.Format("Unable to get the types from the assembly {0}", assembly.FullName));
+                                }
+                                var type = types
+                                    .Where(t => t.Name.Equals("Model", StringComparison.InvariantCultureIgnoreCase))
+                                    .FirstOrDefault();
+                                if(type == null)
+                                {
+                                    throw new ApplicationException(
+                                        string.Format("Unable to get the type {0} from the assembly {1}", 
+                                        "Model", assembly.FullName));
+                                }
                                 var method = type.GetMethod("Initialize");
+                                if(method == null)
+                                {
+                                    throw new ApplicationException(
+                                        string.Format("Unable to get the method {0} from the assembly {1}", 
+                                        "Initialize", assembly.FullName));
+                                }
                                 Object obj = Activator.CreateInstance(type);
                                 method.Invoke(obj, new object[]{subKey, eventLog1});
 
@@ -137,10 +151,29 @@ namespace apmservice
                             key.Close();
                         }
                     }
+
+                    // Set timer for market index data synchronization
+                    Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
+                    syncMktIdxDataThread.Start();
+
+                    // Set timer for trade data synchronization
+                    Thread syncTradeDataThread = new Thread(new ThreadStart(KickOffSyncTradeData));
+                    syncTradeDataThread.Start();
+
+                    // Set timer for generate portfolio
+                    Thread genPortfolioThread = new Thread(new ThreadStart(KickOffGenPortfolio));
+                    genPortfolioThread.Start();
                 }
             }
 
             eventLog1.WriteEntry("Active Portfolio Management Service Started!", EventLogEntryType.Information);
+        }
+
+        private void KickOffGenPortfolio()
+        {
+            _genPortfolioTimer = new System.Timers.Timer(_genPortfolioInterval);
+            _genPortfolioTimer.Elapsed += _genPortfolioTimer_Elapsed;
+            _genPortfolioTimer.Start();
         }
 
         private void KickOffSyncMktIdxData()
@@ -157,79 +190,125 @@ namespace apmservice
             _syncTradeDataTimer.Start();
         }
 
+        private void _genPortfolioTimer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            lock (_genPortfolioLock)
+            {
+                if (_isExistingDailyTradeDataSyncJob && _isExistingMarketIndexDataSyncJob)
+                {
+                    if(!_isExistingGenPortfolioJob)
+                    {
+                        _isExistingGenPortfolioJob = true;
+
+                        var continuation = Task.WhenAll(tasks);
+                        continuation.Wait();
+
+                        if(continuation.Status == TaskStatus.RanToCompletion)
+                        {
+                            ModelGenerateEvent.ModelGenerateEventArgs args =
+                                new ModelGenerateEvent.ModelGenerateEventArgs
+                                {
+                                    MethodName = "Generate",
+                                    ClassName = "Model",
+                                    InvokeArgs = null
+                                };
+
+                            GeneratePortfolio.Invoke(this, args);
+
+                            tasks.RemoveAll(a => a.Status == TaskStatus.RanToCompletion);
+
+                            _isExistingGenPortfolioJob = false;
+                            _isExistingMarketIndexDataSyncJob = false;
+                            _isExistingDailyTradeDataSyncJob = false;
+                        }
+                    }
+                }
+            }
+        }
+
         private void _syncMktIdxDataTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
             lock (_mktIdxDatalock)
             {
-                var _astock = new astockEntities();
-                foreach(var idx in MarketIndexType)
+                if(!_isExistingMarketIndexDataSyncJob)
                 {
-                    var existingData =
-                        _astock.STK_MKT_IndexDaily
-                        .Where(a => a.IndexID.Equals(idx, StringComparison.InvariantCultureIgnoreCase))
-                        .Select(a => a.TradingDate2).OrderByDescending(a => a).ToList();
-
-                    if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
-                    {
-                        continue;
-                    }
-
-                    DateTime nextDay = 
-                        existingData.Count == 0 ?
-                            _defaultStartDate :
-                            ((DateTime)existingData.ElementAt(0)).AddDays(1);
-
-                    if(!Util.SyncMarketIndexDailyData(idx, nextDay, null))
-                    {
-                        continue;
-                    }
+                    tasks.Add(Task.Factory.StartNew(CreateMktIndexDataSyncTask));
+                    _isExistingMarketIndexDataSyncJob = true;
                 }
-
-                ModelGenerateEvent.ModelGenerateEventArgs args =
-                    new ModelGenerateEvent.ModelGenerateEventArgs
-                    {
-                        MethodName = "Generate",
-                        ClassName = "Model",
-                        InvokeArgs = null
-                    };
-
-                GeneratePortfolio.BeginInvoke(this, args, null, null);
             }
         }
 
         private void _syncTradeDataTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
-            lock(_tradeDataLock)
+            lock (_tradeDataLock)
             {
-                var _astock = new astockEntities();
-                var firms = _astock.TRD_Co.Select(a => a.StockId).OrderBy(a => a).ToList();
-                foreach (var firm in firms)
+                if(!_isExistingDailyTradeDataSyncJob)
                 {
-                    // Get Secure ID
-                    string secureId = Util.GetSecureId(firm);
-                    if(string.IsNullOrEmpty(secureId))
-                    {
-                        continue;
-                    }
-                    
-                    // Get trade data
-                    var existingData = _astock.STK_MKT_TradeDaily
-                        .Where(a => a.StockID.Equals(firm, StringComparison.InvariantCultureIgnoreCase))
-                        .Select(a => a.TradeDate2).OrderByDescending(a => a).ToList();
+                    tasks.Add(Task.Factory.StartNew(CreateDailyTradeDataSyncTask));
+                    _isExistingDailyTradeDataSyncJob = true;
+                }
+            }
+        }
 
-                    if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
-                    {
-                        continue;
-                    }
+        private void CreateMktIndexDataSyncTask()
+        {
+            var _astock = new astockEntities();
 
-                    DateTime nextDay = existingData.Count == 0 ? 
-                                            _defaultStartDate : 
-                                            ((DateTime)existingData.ElementAt(0)).AddDays(1);
+            foreach (var idx in MarketIndexType)
+            {
+                var existingData =
+                    _astock.STK_MKT_IndexDaily
+                    .Where(a => a.IndexID.Equals(idx, StringComparison.InvariantCultureIgnoreCase))
+                    .Select(a => a.TradingDate2).OrderByDescending(a => a).ToList();
 
-                    if(!Util.SyncStockTradeDailyData(secureId, firm, nextDay, null))
-                    {
-                        continue;
-                    }
+                if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
+                {
+                    continue;
+                }
+
+                DateTime nextDay =
+                    existingData.Count == 0 ?
+                        _defaultStartDate :
+                        ((DateTime)existingData.ElementAt(0)).AddDays(1);
+
+                if (!Util.SyncMarketIndexDailyData(idx, nextDay, null))
+                {
+                    continue;
+                }
+            }
+        }
+
+        private void CreateDailyTradeDataSyncTask()
+        {
+            var _astock = new astockEntities();
+
+            var firms = _astock.TRD_Co.Select(a => a.StockId).OrderBy(a => a).ToList();
+            foreach (var firm in firms)
+            {
+                // Get Secure ID
+                string secureId = Util.GetSecureId(firm);
+                if (string.IsNullOrEmpty(secureId))
+                {
+                    continue;
+                }
+
+                // Get trade data
+                var existingData = _astock.STK_MKT_TradeDaily
+                    .Where(a => a.StockID.Equals(firm, StringComparison.InvariantCultureIgnoreCase))
+                    .Select(a => a.TradeDate2).OrderByDescending(a => a).ToList();
+
+                if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
+                {
+                    continue;
+                }
+
+                DateTime nextDay = existingData.Count == 0 ?
+                                        _defaultStartDate :
+                                        ((DateTime)existingData.ElementAt(0)).AddDays(1);
+
+                if (!Util.SyncStockTradeDailyData(secureId, firm, nextDay, null))
+                {
+                    continue;
                 }
             }
         }
@@ -245,17 +324,24 @@ namespace apmservice
 
         private static System.Timers.Timer _syncMktIdxDataTimer;
         private static System.Timers.Timer _syncTradeDataTimer;
+        private static System.Timers.Timer _genPortfolioTimer;
 
         private string _token;
         private string _baseUrl;
-        private UInt64 _syncmktIdxDataInterval;
-        private UInt64 _syncTradeDataInterval;
+        private double _syncmktIdxDataInterval;
+        private double _syncTradeDataInterval;
+        private double _genPortfolioInterval;
         private DateTime _defaultStartDate;
         private string[] _providers;
         private event ModelGenerateEvent.ModelGenerateEventHandler GeneratePortfolio;
         private static List<AppDomain> domains = new List<AppDomain>();
+        private static List<Task> tasks = new List<Task>();
+        private static bool _isExistingMarketIndexDataSyncJob = false;
+        private static bool _isExistingDailyTradeDataSyncJob = false;
+        private static bool _isExistingGenPortfolioJob = false;
         private static object _mktIdxDatalock = new object();
         private static object _tradeDataLock = new object();
+        private static object _genPortfolioLock = new object();
 
         private static string[] MarketIndexType = 
             new string[] 
