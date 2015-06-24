@@ -33,5 +33,7 @@ namespace apmservice
         public virtual DbSet<STK_MKT_TradeDaily> STK_MKT_TradeDaily { get; set; }
         public virtual DbSet<TRD_Co> TRD_Co { get; set; }
         public virtual DbSet<TRD_Co_Quarter_ProfitIndex> TRD_Co_Quarter_ProfitIndex { get; set; }
+        public virtual DbSet<TRD_Sector> TRD_Sector { get; set; }
+        public virtual DbSet<STK_MKT_SectorDaily> STK_MKT_SectorDaily { get; set; }
     }
 }

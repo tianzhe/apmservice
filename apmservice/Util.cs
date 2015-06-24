@@ -34,6 +34,25 @@ namespace apmservice
             { "OPTION", "OP" }
         };
 
+        private static string[] IgnoredSectorTypeId = 
+            new string[]
+            {
+                "101001004001",     // East China
+                "101001005001",     // East China
+                "101001004002",     // South China
+                "101001005002",     // South China
+                "101001004005",     // North China
+                "101001005005",     // North China
+                "101001004007",     // Central China
+                "101001005007",     // Central China
+                "101001004003",     // SouthWest China
+                "101001005003",     // SouthWest China
+                "101001004004",     // NorthWest China
+                "101001005004",     // NorthWest China
+                "101001004006",     // NorthEast China
+                "101001005006"      // NorthEast China
+            };
+
         public static void Initialize(string token, string baseUrl, EventLog eventlog)
         {
             _token = token;
@@ -88,7 +107,172 @@ namespace apmservice
             }
         }
 
-        public static bool SyncMarketIndexDailyData(string idx, DateTime startDate, DateTime? endDate)
+        public static bool SyncSectorDailyData(string sectorTypeId, astockEntities astock, DateTime startDate, DateTime? endDate)
+        {
+            if (endDate != null && startDate >= endDate)
+            {
+                return false;
+            }
+
+            if(endDate == null)
+            {
+                endDate = DateTime.Now.Date;
+            }
+
+            try
+            {
+                var constituentStocks = astock.TRD_Co
+                    .Where(a => a.SectorTypeId.Equals(sectorTypeId, StringComparison.InvariantCultureIgnoreCase))
+                    .Select(a => a.StockId).ToList();
+
+                DateTime temp = startDate;
+                double sectorReturnRateNonReinvest = 0;
+                double sectorReturnRateReinvest = 0;
+                double sectorCirculatedMarketValue = 0;
+                while(temp <= endDate)
+                {
+                    foreach (var stock in constituentStocks)
+                    {
+                        var tradeRecord = astock.STK_MKT_TradeDaily
+                            .Where(a => a.StockID.Equals(stock, StringComparison.InvariantCultureIgnoreCase) && a.TradeDate2 == temp)
+                            .FirstOrDefault();
+
+                        if(tradeRecord != null)
+                        {
+                            sectorReturnRateNonReinvest +=
+                                ((tradeRecord.SumCirculatedMarketValue == null) || (tradeRecord.ReturnRateNonReinvest == null)) ?
+                                0 :
+                                ((double)tradeRecord.SumCirculatedMarketValue * (double)tradeRecord.ReturnRateNonReinvest);
+
+                            sectorReturnRateReinvest +=
+                                ((tradeRecord.SumCirculatedMarketValue == null) || (tradeRecord.ReturnRateReinvest == null)) ?
+                                0 :
+                                ((double)tradeRecord.SumCirculatedMarketValue * (double)tradeRecord.ReturnRateReinvest);
+                            sectorCirculatedMarketValue += 
+                                tradeRecord.SumCirculatedMarketValue == null ?
+                                0 :
+                                (double)tradeRecord.SumCirculatedMarketValue;
+                        }
+                    }
+                    sectorReturnRateNonReinvest =
+                            sectorReturnRateNonReinvest == 0 ?
+                            0 : sectorReturnRateNonReinvest / sectorCirculatedMarketValue;
+
+                    sectorReturnRateReinvest =
+                        sectorReturnRateReinvest == 0 ?
+                        0 : sectorReturnRateReinvest / sectorCirculatedMarketValue;
+
+                    STK_MKT_SectorDaily record = new STK_MKT_SectorDaily
+                    {
+                        SectorTypeId = sectorTypeId,
+                        TradeDate = temp,
+                        CirculatedMarketValueWeightedReturnRateNonReinvest = sectorReturnRateNonReinvest,
+                        CirculatedMarketValueWeightedReturnRateReinvest = sectorReturnRateReinvest,
+                        UniqueId = Guid.NewGuid()
+                    };
+
+                    astock.STK_MKT_SectorDaily.Add(record);
+
+                    temp.AddDays(1);
+                }
+
+                astock.SaveChanges();
+            }
+            catch(Exception ex)
+            {
+                _eventLog.WriteEntry(
+                    string.Format(
+                        "Unexpected error occurred.\nDetails = {0}\nStack Trace = {1}",
+                        ex.Message, ex.StackTrace), EventLogEntryType.Error);
+
+                if (ex.InnerException != null)
+                {
+                    _eventLog.WriteEntry(
+                        string.Format(
+                            "Inner Exception Message = {0}\nStack Trace = {1}",
+                            ex.InnerException.Message, ex.InnerException.StackTrace),
+                            EventLogEntryType.Error);
+                }
+
+                return false;
+            }
+
+            return true;
+
+        }
+
+        public static bool CalculateSectorBetaPerStock(string stockId, string sectorTypeId, astockEntities astock, DateTime startDate, DateTime? endDate)
+        {
+            if (endDate != null && startDate >= endDate)
+            {
+                return false;
+            }
+
+            if (endDate == null)
+            {
+                endDate = DateTime.Now.Date;
+            }
+
+            try
+            {
+                DateTime temp = startDate;
+
+                while(temp <= endDate)
+                {
+                    var riskRecord = astock.STK_MKT_RiskFactorDaily
+                        .Where(a => a.TradingDate2 == temp && ((a.SectorBeta1 == null) || (a.SectorBeta2 == null)))
+                        .FirstOrDefault();
+
+                    if(riskRecord != null)
+                    {
+                        var otherFirmsInSameSector = astock.TRD_Co
+                            .Where(a => 
+                                a.SectorTypeId.Equals(sectorTypeId, StringComparison.CurrentCultureIgnoreCase) &&
+                                !a.StockId.Equals(stockId, StringComparison.InvariantCultureIgnoreCase))
+                            .Select(a => a.StockId)
+                            .ToList();
+
+                        var dateMinusOneYear = temp.AddYears(-1).Date;
+                        foreach (var firm in otherFirmsInSameSector)
+                        {
+                            var tradeRecords = astock.STK_MKT_TradeDaily
+                                .Where(a => 
+                                    a.StockID.Equals(firm, StringComparison.InvariantCultureIgnoreCase) && 
+                                    a.TradeDate2 >= dateMinusOneYear && 
+                                    a.TradeDate2 <= temp)
+                                .Select(a => new { Date = a.TradeDate2, a.SumCirculatedMarketValue, a.ReturnRateReinvest, a.ReturnRateNonReinvest })
+                                .OrderByDescending(a => a.Date).ToList();
+
+                            //TODO
+                        }
+                    }
+
+                    temp.AddDays(1);
+                }
+            }
+            catch(Exception ex)
+            {
+                _eventLog.WriteEntry(
+                    string.Format(
+                        "Unexpected error occurred.\nDetails = {0}\nStack Trace = {1}",
+                        ex.Message, ex.StackTrace), EventLogEntryType.Error);
+
+                if (ex.InnerException != null)
+                {
+                    _eventLog.WriteEntry(
+                        string.Format(
+                            "Inner Exception Message = {0}\nStack Trace = {1}",
+                            ex.InnerException.Message, ex.InnerException.StackTrace),
+                            EventLogEntryType.Error);
+                }
+
+                return false;
+            }
+
+            return true;
+        }
+
+        public static bool SyncMarketIndexDailyData(string idx, astockEntities astock, DateTime startDate, DateTime? endDate)
         {
             if (endDate != null && startDate >= endDate)
             {
@@ -198,11 +382,11 @@ namespace apmservice
                         TradingDate2 = trade.TradeDateConverted
                     };
 #if(!DEBUG)
-                    _astock.STK_MKT_IndexDaily.Add(newRecord);
+                    astock.STK_MKT_IndexDaily.Add(newRecord);
 #endif
                 }
 #if(!DEBUG)
-                _astock.SaveChanges();
+                astock.SaveChanges();
 #endif
                 _eventLog.WriteEntry(
                     string.Format("Successfully inserted {0} index trade data records to database for Index ID {1}",
@@ -351,7 +535,7 @@ namespace apmservice
         /// <param name="startDate">The start date, included</param>
         /// <param name="endDate">The end date, included, if it's null, then it means the latest</param>
         /// <returns></returns>
-        public static bool SyncStockTradeDailyData(string secureId, string stockId, DateTime startDate, DateTime? endDate)
+        public static bool SyncStockTradeDailyData(string secureId, string stockId, astockEntities astock, DateTime startDate, DateTime? endDate)
         {
             if(endDate != null && startDate >= endDate)
             {
@@ -520,14 +704,14 @@ namespace apmservice
                             .FirstOrDefault()
                     };
 #if(RELEASE)
-                    _astock.STK_MKT_TradeDaily.Add(newRecord);
+                    astock.STK_MKT_TradeDaily.Add(newRecord);
 #endif
 
                     prevClosePriceComparableNonReinvest = curClosePriceComparableNonReinvest;
                     prevClosePriceComparableReinvest = curClosePriceComparableReinvest;
                 }
 #if(RELEASE)
-                _astock.SaveChanges();
+                astock.SaveChanges();
 #endif
                 _eventLog.WriteEntry(
                     string.Format("Successfully inserted {0} trade data records to database for stock ID {1}",

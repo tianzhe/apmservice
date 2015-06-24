@@ -142,8 +142,10 @@
     <Compile Include="Contracts\ErrorResponse.cs" />
     <Compile Include="Contracts\MarketIndexRequest.cs" />
     <Compile Include="Contracts\MarketIndexResponse.cs" />
+    <Compile Include="Contracts\SectorConstituentStockResponse.cs" />
     <Compile Include="Contracts\SecureIdRequest.cs" />
     <Compile Include="Contracts\SecureIdResponse.cs" />
+    <Compile Include="Contracts\SecuritySectorResponse.cs" />
     <Compile Include="Contracts\StockDailyReturnRequest.cs" />
     <Compile Include="Contracts\StockDailyReturnResponse.cs" />
     <Compile Include="Contracts\TradeDailyRequest.cs" />
@@ -173,6 +175,9 @@
     <Compile Include="STK_MKT_RiskFactorDaily.cs">
       <DependentUpon>astock.tt</DependentUpon>
     </Compile>
+    <Compile Include="STK_MKT_SectorDaily.cs">
+      <DependentUpon>astock.tt</DependentUpon>
+    </Compile>
     <Compile Include="STK_MKT_TradeDaily.cs">
       <DependentUpon>astock.tt</DependentUpon>
     </Compile>
@@ -180,6 +185,9 @@
       <DependentUpon>astock.tt</DependentUpon>
     </Compile>
     <Compile Include="TRD_Co_Quarter_ProfitIndex.cs">
+      <DependentUpon>astock.tt</DependentUpon>
+    </Compile>
+    <Compile Include="TRD_Sector.cs">
       <DependentUpon>astock.tt</DependentUpon>
     </Compile>
     <Compile Include="Util.cs" />

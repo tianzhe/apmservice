@@ -4,7 +4,7 @@
   <edmx:Designer xmlns="http://schemas.microsoft.com/ado/2009/11/edmx">
     <!-- Diagram content (shape and connector positions) -->
     <edmx:Diagrams>
-      <Diagram DiagramId="8fcf8ab37ec84b179b84b324d1088456" Name="Diagram1">
+      <Diagram DiagramId="8fcf8ab37ec84b179b84b324d1088456" Name="Diagram1" ZoomLevel="95">
         <EntityTypeShape EntityType="astockModel.STK_MKT_ConsolidatedReturn" Width="1.5" PointX="5.75" PointY="0.75" IsExpanded="true" />
         <EntityTypeShape EntityType="astockModel.STK_MKT_DeriativeTradingIndexDaily" Width="1.5" PointX="3" PointY="1.75" IsExpanded="true" />
         <EntityTypeShape EntityType="astockModel.STK_MKT_IndexDaily" Width="1.5" PointX="5.75" PointY="5.75" IsExpanded="true" />
@@ -17,6 +17,9 @@
         <AssociationConnector Association="astockModel.FK_STK_MKT_RiskFactorDaily_TRD_Co" ManuallyRouted="false" />
         <AssociationConnector Association="astockModel.FK_STK_MKT_TradeDaily_TRD_Co" ManuallyRouted="false" />
         <EntityTypeShape EntityType="astockModel.TRD_Co_Quarter_ProfitIndex" Width="1.5" PointX="8.375" PointY="0.75" />
+        <EntityTypeShape EntityType="astockModel.TRD_Sector" Width="1.5" PointX="0.75" PointY="4.75" />
+        <AssociationConnector Association="astockModel.FK_TRD_Co_TRD_Sector" />
+        <EntityTypeShape EntityType="astockModel.STK_MKT_SectorDaily" Width="1.5" PointX="5.375" PointY="9.75" />
       </Diagram>
     </edmx:Diagrams>
   </edmx:Designer>

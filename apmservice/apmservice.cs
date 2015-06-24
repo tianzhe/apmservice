@@ -50,10 +50,14 @@ namespace apmservice
                 _baseUrl = key.GetValue("DataYesBaseUrl").ToString();
                 _syncmktIdxDataInterval = TimeSpan.Parse(key.GetValue("SyncMarketIndexDataInterval").ToString()).TotalMilliseconds;
                 _syncTradeDataInterval = TimeSpan.Parse(key.GetValue("SyncTradeDataInterval").ToString()).TotalMilliseconds;
+                _syncSectorConstituentStocksInterval = TimeSpan.Parse(key.GetValue("SyncSectorConstituentStocksInterval").ToString()).TotalMilliseconds;
                 _genPortfolioInterval = TimeSpan.Parse(key.GetValue("GeneratePortfolioInterval").ToString()).TotalMilliseconds;
                 _defaultStartDate = DateTime.Parse(key.GetValue("DefaultQueryStartDate").ToString());
                 _providers = (string[])key.GetValue("ProviderNames");
                 imagePath = key.GetValue("ImagePath").ToString().TrimEnd('\"').TrimStart('\"');
+                _isCreateSyncDailyTradeDataJob = Int32.Parse(key.GetValue("IsCreateSyncMarketIndexDataJob").ToString()) == 1;
+                _isCreateSyncMarketIndexDataJob = Int32.Parse(key.GetValue("IsCreateSyncDailyTradeDateJob").ToString()) == 1;
+                _isCreateSyncSectorConstituentStocksJob = Int32.Parse(key.GetValue("IsCreateSyncSectorConstituentStocksJob").ToString()) == 1;
             }
             catch(Exception ex)
             {
@@ -119,7 +123,7 @@ namespace apmservice
                                         "Initialize", assembly.FullName));
                                 }
                                 Object obj = Activator.CreateInstance(type);
-                                method.Invoke(obj, new object[]{subKey, eventLog1});
+                                method.Invoke(obj, new object[]{subKey.Name});
 
                                 // Register the callback
                                 var domain = AppDomain.CreateDomain(provider);
@@ -153,12 +157,25 @@ namespace apmservice
                     }
 
                     // Set timer for market index data synchronization
-                    Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
-                    syncMktIdxDataThread.Start();
+                    if(_isCreateSyncMarketIndexDataJob)
+                    {
+                        Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
+                        syncMktIdxDataThread.Start();
+                    }
 
                     // Set timer for trade data synchronization
-                    Thread syncTradeDataThread = new Thread(new ThreadStart(KickOffSyncTradeData));
-                    syncTradeDataThread.Start();
+                    if(_isCreateSyncDailyTradeDataJob)
+                    {
+                        Thread syncTradeDataThread = new Thread(new ThreadStart(KickOffSyncTradeData));
+                        syncTradeDataThread.Start();
+                    }
+
+                    // Set timer for sector constituent stocks synchronization
+                    if(_isCreateSyncSectorConstituentStocksJob)
+                    {
+                        Thread syncSectorConstituentStocksThread = new Thread(new ThreadStart(KickOffSyncSectorConstituentStocks));
+                        syncSectorConstituentStocksThread.Start();
+                    }
 
                     // Set timer for generate portfolio
                     Thread genPortfolioThread = new Thread(new ThreadStart(KickOffGenPortfolio));
@@ -190,37 +207,61 @@ namespace apmservice
             _syncTradeDataTimer.Start();
         }
 
+        private void KickOffSyncSectorConstituentStocks()
+        {
+            _syncSectorConstituentStocksTimer = new System.Timers.Timer(_syncSectorConstituentStocksInterval);
+            _syncSectorConstituentStocksTimer.Elapsed += _syncSectorConstituentStocksTimer_Elapsed;
+            _syncSectorConstituentStocksTimer.Start();
+        }
+
         private void _genPortfolioTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
             lock (_genPortfolioLock)
             {
-                if (_isExistingDailyTradeDataSyncJob && _isExistingMarketIndexDataSyncJob)
+                if(
+                    (_isCreateSyncMarketIndexDataJob && !_isExistingMarketIndexDataSyncJob) ||
+                    (_isCreateSyncDailyTradeDataJob && !_isExistingDailyTradeDataSyncJob) ||
+                    (_isCreateSyncSectorConstituentStocksJob && !_isExistingSectorConstituentStocksSyncJob) ||
+                    _isExistingGenPortfolioJob)
                 {
-                    if(!_isExistingGenPortfolioJob)
-                    {
-                        _isExistingGenPortfolioJob = true;
+                    return;
+                }
 
-                        var continuation = Task.WhenAll(tasks);
-                        continuation.Wait();
+                _isExistingGenPortfolioJob = true;
 
-                        if(continuation.Status == TaskStatus.RanToCompletion)
+                var continuation = Task.WhenAll(tasks);
+                continuation.Wait();
+
+                if(continuation.Status == TaskStatus.RanToCompletion)
+                {
+                    ModelGenerateEvent.ModelGenerateEventArgs args =
+                        new ModelGenerateEvent.ModelGenerateEventArgs
                         {
-                            ModelGenerateEvent.ModelGenerateEventArgs args =
-                                new ModelGenerateEvent.ModelGenerateEventArgs
-                                {
-                                    MethodName = "Generate",
-                                    ClassName = "Model",
-                                    InvokeArgs = null
-                                };
+                            MethodName = "Generate",
+                            ClassName = "Model",
+                            InvokeArgs = null
+                        };
 
-                            GeneratePortfolio.Invoke(this, args);
+                    try
+                    {
+                        GeneratePortfolio.Invoke(this, args);
+                    }
+                    catch(Exception ex)
+                    {
+                        eventLog1.WriteEntry(
+                            string.Format(
+                            "Unexpected error encountered when attempting to call method '{0}' in class '{1}' in assembly '{2}'.\nDetails = {3}",
+                            args.MethodName, args.ClassName, GeneratePortfolio.Target.ToString(), ex.Message),
+                            EventLogEntryType.Error);
+                    }
+                    finally
+                    {
+                        tasks.RemoveAll(a => a.Status == TaskStatus.RanToCompletion);
 
-                            tasks.RemoveAll(a => a.Status == TaskStatus.RanToCompletion);
-
-                            _isExistingGenPortfolioJob = false;
-                            _isExistingMarketIndexDataSyncJob = false;
-                            _isExistingDailyTradeDataSyncJob = false;
-                        }
+                        _isExistingGenPortfolioJob = false;
+                        _isExistingMarketIndexDataSyncJob = false;
+                        _isExistingDailyTradeDataSyncJob = false;
+                        _isExistingSectorConstituentStocksSyncJob = false;
                     }
                 }
             }
@@ -230,7 +271,7 @@ namespace apmservice
         {
             lock (_mktIdxDatalock)
             {
-                if(!_isExistingMarketIndexDataSyncJob)
+                if (!_isExistingMarketIndexDataSyncJob)
                 {
                     tasks.Add(Task.Factory.StartNew(CreateMktIndexDataSyncTask));
                     _isExistingMarketIndexDataSyncJob = true;
@@ -242,10 +283,77 @@ namespace apmservice
         {
             lock (_tradeDataLock)
             {
-                if(!_isExistingDailyTradeDataSyncJob)
+                if (_isExistingDailyTradeDataSyncJob)
                 {
                     tasks.Add(Task.Factory.StartNew(CreateDailyTradeDataSyncTask));
                     _isExistingDailyTradeDataSyncJob = true;
+                }
+            }
+        }
+
+        private void _syncSectorConstituentStocksTimer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            lock (_sectorConstituentStocksLock)
+            {
+                if (!_isExistingSectorConstituentStocksSyncJob)
+                {
+                    tasks.Add(Task.Factory.StartNew(CreateSectorConstituentStocksSyncTask));
+                    _isExistingSectorConstituentStocksSyncJob = true;
+                }
+            }
+        }
+
+        private void CreateSectorConstituentStocksSyncTask()
+        {
+            var _astock = new astockEntities();
+
+            var sectors = _astock.TRD_Sector.Select(s => s.SectorTypeId).ToList();
+
+            foreach(var sector in sectors)
+            {
+                var existingData =
+                    _astock.STK_MKT_SectorDaily
+                    .Where(a => a.SectorTypeId.Equals(sector, StringComparison.InvariantCultureIgnoreCase))
+                    .Select(a => a.TradeDate).OrderByDescending(a => a).ToList();
+
+                if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
+                {
+                    continue;
+                }
+
+                DateTime nextDay =
+                    existingData.Count == 0 ?
+                        _defaultStartDate :
+                        ((DateTime)existingData.ElementAt(0)).AddDays(1);
+
+                if (!Util.SyncSectorDailyData(sector, _astock, nextDay, null))
+                {
+                    continue;
+                }
+            }
+
+            var firms = _astock.TRD_Co.Select(a => new { a.StockId, a.SectorTypeId }).ToList();
+
+            foreach(var firm in firms)
+            {
+                var existingData =
+                    _astock.STK_MKT_RiskFactorDaily
+                    .Where(a => a.Symbol.Equals(firm.StockId, StringComparison.InvariantCultureIgnoreCase) && a.SectorBeta1 != null && a.SectorBeta2 != null)
+                    .Select(a => a.TradingDate2).OrderByDescending(a => a).ToList();
+
+                if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
+                {
+                    continue;
+                }
+
+                DateTime nextDay =
+                    existingData.Count == 0 ?
+                        _defaultStartDate :
+                        ((DateTime)existingData.ElementAt(0)).AddDays(1);
+
+                if (!Util.CalculateSectorBetaPerStock(firm.StockId, firm.SectorTypeId, _astock, nextDay, null))
+                {
+                    continue;
                 }
             }
         }
@@ -271,7 +379,7 @@ namespace apmservice
                         _defaultStartDate :
                         ((DateTime)existingData.ElementAt(0)).AddDays(1);
 
-                if (!Util.SyncMarketIndexDailyData(idx, nextDay, null))
+                if (!Util.SyncMarketIndexDailyData(idx, _astock, nextDay, null))
                 {
                     continue;
                 }
@@ -306,7 +414,7 @@ namespace apmservice
                                         _defaultStartDate :
                                         ((DateTime)existingData.ElementAt(0)).AddDays(1);
 
-                if (!Util.SyncStockTradeDailyData(secureId, firm, nextDay, null))
+                if (!Util.SyncStockTradeDailyData(secureId, firm, _astock, nextDay, null))
                 {
                     continue;
                 }
@@ -324,6 +432,7 @@ namespace apmservice
 
         private static System.Timers.Timer _syncMktIdxDataTimer;
         private static System.Timers.Timer _syncTradeDataTimer;
+        private static System.Timers.Timer _syncSectorConstituentStocksTimer;
         private static System.Timers.Timer _genPortfolioTimer;
 
         private string _token;
@@ -331,6 +440,7 @@ namespace apmservice
         private double _syncmktIdxDataInterval;
         private double _syncTradeDataInterval;
         private double _genPortfolioInterval;
+        private double _syncSectorConstituentStocksInterval;
         private DateTime _defaultStartDate;
         private string[] _providers;
         private event ModelGenerateEvent.ModelGenerateEventHandler GeneratePortfolio;
@@ -338,9 +448,14 @@ namespace apmservice
         private static List<Task> tasks = new List<Task>();
         private static bool _isExistingMarketIndexDataSyncJob = false;
         private static bool _isExistingDailyTradeDataSyncJob = false;
+        private static bool _isExistingSectorConstituentStocksSyncJob = false;
         private static bool _isExistingGenPortfolioJob = false;
+        private static bool _isCreateSyncMarketIndexDataJob = false;
+        private static bool _isCreateSyncDailyTradeDataJob = false;
+        private static bool _isCreateSyncSectorConstituentStocksJob = true;
         private static object _mktIdxDatalock = new object();
         private static object _tradeDataLock = new object();
+        private static object _sectorConstituentStocksLock = new object();
         private static object _genPortfolioLock = new object();
 
         private static string[] MarketIndexType = 

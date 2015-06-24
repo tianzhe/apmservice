@@ -37,8 +37,12 @@ namespace apmservice
                 key.SetValue("SyncMarketIndexDataInterval", "00:00:15", RegistryValueKind.String);
                 key.SetValue("SyncTradeDataInterval", "00:00:15", RegistryValueKind.String);
                 key.SetValue("GeneratePortfolioInterval", "00:00:15", RegistryValueKind.String);
+                key.SetValue("SyncSectorConstituentStocksInterval", "00:00:15", RegistryValueKind.String);
                 key.SetValue("DefaultQueryStartDate", "2012-01-01", RegistryValueKind.String);
                 key.SetValue("ProviderNames", new string[]{}, RegistryValueKind.MultiString);
+                key.SetValue("IsCreateSyncMarketIndexDataJob", 0, RegistryValueKind.DWord);
+                key.SetValue("IsCreateSyncDailyTradeDateJob", 0, RegistryValueKind.DWord);
+                key.SetValue("IsCreateSyncSectorConstituentStocksJob", 1, RegistryValueKind.DWord);
             }
             catch(Exception ex)
             {

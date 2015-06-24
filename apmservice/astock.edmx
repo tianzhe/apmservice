@@ -100,6 +100,18 @@
           <Property Name="ARsq2" Type="float" />
           <Property Name="UniqueID" Type="uniqueidentifier" Nullable="false" />
           <Property Name="TradingDate2" Type="datetime" />
+          <Property Name="SectorBeta1" Type="float" />
+          <Property Name="SectorBeta2" Type="float" />
+        </EntityType>
+        <EntityType Name="STK_MKT_SectorDaily">
+          <Key>
+            <PropertyRef Name="UniqueId" />
+          </Key>
+          <Property Name="SectorTypeId" Type="nvarchar" MaxLength="255" />
+          <Property Name="CirculatedMarketValueWeightedReturnRateReinvest" Type="float" />
+          <Property Name="CirculatedMarketValueWeightedReturnRateNonReinvest" Type="float" />
+          <Property Name="TradeDate" Type="datetime" />
+          <Property Name="UniqueId" Type="uniqueidentifier" Nullable="false" />
         </EntityType>
         <EntityType Name="STK_MKT_TradeDaily">
           <Key>
@@ -157,6 +169,7 @@
           <Property Name="StatusChangeDate" Type="nvarchar" MaxLength="255" />
           <Property Name="HStockInterchangeCode" Type="nvarchar" MaxLength="255" />
           <Property Name="MarketType" Type="float" />
+          <Property Name="SectorTypeId" Type="nvarchar" MaxLength="255" />
         </EntityType>
         <EntityType Name="TRD_Co_Quarter_ProfitIndex">
           <Key>
@@ -236,6 +249,13 @@
           <Property Name="UniqueID" Type="uniqueidentifier" Nullable="false" />
           <Property Name="DateAsOfReporting2" Type="datetime" />
         </EntityType>
+        <EntityType Name="TRD_Sector">
+          <Key>
+            <PropertyRef Name="SectorTypeId" />
+          </Key>
+          <Property Name="SectorTypeId" Type="nvarchar" MaxLength="255" Nullable="false" />
+          <Property Name="SectorTypeName" Type="nvarchar" MaxLength="255" />
+        </EntityType>
         <Association Name="FK_STK_MKT_PortfolioBase_TRD_Co">
           <End Role="TRD_Co" Type="Self.TRD_Co" Multiplicity="0..1" />
           <End Role="STK_MKT_PortfolioBase" Type="Self.STK_MKT_PortfolioBase" Multiplicity="*" />
@@ -272,15 +292,29 @@
             </Dependent>
           </ReferentialConstraint>
         </Association>
+        <Association Name="FK_TRD_Co_TRD_Sector">
+          <End Role="TRD_Sector" Type="Self.TRD_Sector" Multiplicity="0..1" />
+          <End Role="TRD_Co" Type="Self.TRD_Co" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="TRD_Sector">
+              <PropertyRef Name="SectorTypeId" />
+            </Principal>
+            <Dependent Role="TRD_Co">
+              <PropertyRef Name="SectorTypeId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
         <EntityContainer Name="astockModelStoreContainer">
           <EntitySet Name="STK_MKT_ConsolidatedReturn" EntityType="Self.STK_MKT_ConsolidatedReturn" Schema="dbo" store:Type="Tables" />
           <EntitySet Name="STK_MKT_DeriativeTradingIndexDaily" EntityType="Self.STK_MKT_DeriativeTradingIndexDaily" Schema="dbo" store:Type="Tables" />
           <EntitySet Name="STK_MKT_IndexDaily" EntityType="Self.STK_MKT_IndexDaily" Schema="dbo" store:Type="Tables" />
           <EntitySet Name="STK_MKT_PortfolioBase" EntityType="Self.STK_MKT_PortfolioBase" Schema="dbo" store:Type="Tables" />
           <EntitySet Name="STK_MKT_RiskFactorDaily" EntityType="Self.STK_MKT_RiskFactorDaily" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="STK_MKT_SectorDaily" EntityType="Self.STK_MKT_SectorDaily" Schema="dbo" store:Type="Tables" />
           <EntitySet Name="STK_MKT_TradeDaily" EntityType="Self.STK_MKT_TradeDaily" Schema="dbo" store:Type="Tables" />
           <EntitySet Name="TRD_Co" EntityType="Self.TRD_Co" Schema="dbo" store:Type="Tables" />
           <EntitySet Name="TRD_Co_Quarter_ProfitIndex" EntityType="Self.TRD_Co_Quarter_ProfitIndex" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="TRD_Sector" EntityType="Self.TRD_Sector" Schema="dbo" store:Type="Tables" />
           <AssociationSet Name="FK_STK_MKT_PortfolioBase_TRD_Co" Association="Self.FK_STK_MKT_PortfolioBase_TRD_Co">
             <End Role="TRD_Co" EntitySet="TRD_Co" />
             <End Role="STK_MKT_PortfolioBase" EntitySet="STK_MKT_PortfolioBase" />
@@ -292,6 +326,10 @@
           <AssociationSet Name="FK_STK_MKT_TradeDaily_TRD_Co" Association="Self.FK_STK_MKT_TradeDaily_TRD_Co">
             <End Role="TRD_Co" EntitySet="TRD_Co" />
             <End Role="STK_MKT_TradeDaily" EntitySet="STK_MKT_TradeDaily" />
+          </AssociationSet>
+          <AssociationSet Name="FK_TRD_Co_TRD_Sector" Association="Self.FK_TRD_Co_TRD_Sector">
+            <End Role="TRD_Sector" EntitySet="TRD_Sector" />
+            <End Role="TRD_Co" EntitySet="TRD_Co" />
           </AssociationSet>
         </EntityContainer>
       </Schema></edmx:StorageModels>
@@ -396,6 +434,8 @@
           <Property Name="UniqueID" Type="Guid" Nullable="false" />
           <NavigationProperty Name="TRD_Co" Relationship="Self.FK_STK_MKT_RiskFactorDaily_TRD_Co" FromRole="STK_MKT_RiskFactorDaily" ToRole="TRD_Co" />
           <Property Name="TradingDate2" Type="DateTime" Precision="3" />
+          <Property Name="SectorBeta1" Type="Double" />
+          <Property Name="SectorBeta2" Type="Double" />
         </EntityType>
         <EntityType Name="STK_MKT_TradeDaily">
           <Key>
@@ -458,6 +498,8 @@
           <NavigationProperty Name="STK_MKT_PortfolioBase" Relationship="Self.FK_STK_MKT_PortfolioBase_TRD_Co" FromRole="TRD_Co" ToRole="STK_MKT_PortfolioBase" />
           <NavigationProperty Name="STK_MKT_RiskFactorDaily" Relationship="Self.FK_STK_MKT_RiskFactorDaily_TRD_Co" FromRole="TRD_Co" ToRole="STK_MKT_RiskFactorDaily" />
           <NavigationProperty Name="STK_MKT_TradeDaily" Relationship="Self.FK_STK_MKT_TradeDaily_TRD_Co" FromRole="TRD_Co" ToRole="STK_MKT_TradeDaily" />
+          <Property Name="SectorTypeId" Type="String" MaxLength="255" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="TRD_Sector" Relationship="astockModel.FK_TRD_Co_TRD_Sector" FromRole="TRD_Co" ToRole="TRD_Sector" />
         </EntityType>
         <Association Name="FK_STK_MKT_DeriativeTradingIndexDaily_TRD_Co">
           <End Role="TRD_Co" Type="Self.TRD_Co" Multiplicity="1" />
@@ -532,6 +574,12 @@
             <End Role="STK_MKT_TradeDaily" EntitySet="STK_MKT_TradeDaily" />
           </AssociationSet>
           <EntitySet Name="TRD_Co_Quarter_ProfitIndex" EntityType="astockModel.TRD_Co_Quarter_ProfitIndex" />
+          <EntitySet Name="TRD_Sector" EntityType="astockModel.TRD_Sector" />
+          <AssociationSet Name="FK_TRD_Co_TRD_Sector" Association="astockModel.FK_TRD_Co_TRD_Sector">
+            <End Role="TRD_Sector" EntitySet="TRD_Sector" />
+            <End Role="TRD_Co" EntitySet="TRD_Co" />
+          </AssociationSet>
+          <EntitySet Name="STK_MKT_SectorDaily" EntityType="astockModel.STK_MKT_SectorDaily" />
         </EntityContainer>
         <EntityType Name="TRD_Co_Quarter_ProfitIndex">
           <Key>
@@ -610,6 +658,36 @@
           <Property Name="ROI" Type="Double" />
           <Property Name="UniqueID" Type="Guid" Nullable="false" />
           <Property Name="DateAsOfReporting2" Type="DateTime" Precision="3" />
+        </EntityType>
+        <EntityType Name="TRD_Sector">
+          <Key>
+            <PropertyRef Name="SectorTypeId" />
+          </Key>
+          <Property Name="SectorTypeId" Type="String" Nullable="false" MaxLength="255" FixedLength="false" Unicode="true" />
+          <Property Name="SectorTypeName" Type="String" MaxLength="255" FixedLength="false" Unicode="true" />
+          <NavigationProperty Name="TRD_Co" Relationship="astockModel.FK_TRD_Co_TRD_Sector" FromRole="TRD_Sector" ToRole="TRD_Co" />
+        </EntityType>
+        <Association Name="FK_TRD_Co_TRD_Sector">
+          <End Type="astockModel.TRD_Sector" Role="TRD_Sector" Multiplicity="0..1" />
+          <End Type="astockModel.TRD_Co" Role="TRD_Co" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="TRD_Sector">
+              <PropertyRef Name="SectorTypeId" />
+            </Principal>
+            <Dependent Role="TRD_Co">
+              <PropertyRef Name="SectorTypeId" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <EntityType Name="STK_MKT_SectorDaily">
+          <Key>
+            <PropertyRef Name="UniqueId" />
+          </Key>
+          <Property Name="SectorTypeId" Type="String" MaxLength="255" FixedLength="false" Unicode="true" />
+          <Property Name="CirculatedMarketValueWeightedReturnRateReinvest" Type="Double" />
+          <Property Name="CirculatedMarketValueWeightedReturnRateNonReinvest" Type="Double" />
+          <Property Name="TradeDate" Type="DateTime" Precision="3" />
+          <Property Name="UniqueId" Type="Guid" Nullable="false" />
         </EntityType>
       </Schema>
     </edmx:ConceptualModels>
@@ -698,6 +776,8 @@
           <EntitySetMapping Name="STK_MKT_RiskFactorDaily">
             <EntityTypeMapping TypeName="astockModel.STK_MKT_RiskFactorDaily">
               <MappingFragment StoreEntitySet="STK_MKT_RiskFactorDaily">
+                <ScalarProperty Name="SectorBeta2" ColumnName="SectorBeta2" />
+                <ScalarProperty Name="SectorBeta1" ColumnName="SectorBeta1" />
                 <ScalarProperty Name="TradingDate2" ColumnName="TradingDate2" />
                 <ScalarProperty Name="SecurityID" ColumnName="SecurityID" />
                 <ScalarProperty Name="Symbol" ColumnName="Symbol" />
@@ -746,6 +826,7 @@
           <EntitySetMapping Name="TRD_Co">
             <EntityTypeMapping TypeName="astockModel.TRD_Co">
               <MappingFragment StoreEntitySet="TRD_Co">
+                <ScalarProperty Name="SectorTypeId" ColumnName="SectorTypeId" />
                 <ScalarProperty Name="CoutryId" ColumnName="CoutryId" />
                 <ScalarProperty Name="StockId" ColumnName="StockId" />
                 <ScalarProperty Name="StockName" ColumnName="StockName" />
@@ -853,6 +934,25 @@
                 <ScalarProperty Name="TypeOfReport" ColumnName="TypeOfReport" />
                 <ScalarProperty Name="DateAsOfReporting" ColumnName="DateAsOfReporting" />
                 <ScalarProperty Name="StockID" ColumnName="StockID" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="TRD_Sector">
+            <EntityTypeMapping TypeName="astockModel.TRD_Sector">
+              <MappingFragment StoreEntitySet="TRD_Sector">
+                <ScalarProperty Name="SectorTypeName" ColumnName="SectorTypeName" />
+                <ScalarProperty Name="SectorTypeId" ColumnName="SectorTypeId" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="STK_MKT_SectorDaily">
+            <EntityTypeMapping TypeName="astockModel.STK_MKT_SectorDaily">
+              <MappingFragment StoreEntitySet="STK_MKT_SectorDaily">
+                <ScalarProperty Name="UniqueId" ColumnName="UniqueId" />
+                <ScalarProperty Name="TradeDate" ColumnName="TradeDate" />
+                <ScalarProperty Name="CirculatedMarketValueWeightedReturnRateNonReinvest" ColumnName="CirculatedMarketValueWeightedReturnRateNonReinvest" />
+                <ScalarProperty Name="CirculatedMarketValueWeightedReturnRateReinvest" ColumnName="CirculatedMarketValueWeightedReturnRateReinvest" />
+                <ScalarProperty Name="SectorTypeId" ColumnName="SectorTypeId" />
               </MappingFragment>
             </EntityTypeMapping>
           </EntitySetMapping>

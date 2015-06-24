@@ -50,10 +50,12 @@ namespace apmservice
         public string StatusChangeDate { get; set; }
         public string HStockInterchangeCode { get; set; }
         public Nullable<double> MarketType { get; set; }
+        public string SectorTypeId { get; set; }
     
         public virtual ICollection<STK_MKT_DeriativeTradingIndexDaily> STK_MKT_DeriativeTradingIndexDaily { get; set; }
         public virtual ICollection<STK_MKT_PortfolioBase> STK_MKT_PortfolioBase { get; set; }
         public virtual ICollection<STK_MKT_RiskFactorDaily> STK_MKT_RiskFactorDaily { get; set; }
         public virtual ICollection<STK_MKT_TradeDaily> STK_MKT_TradeDaily { get; set; }
+        public virtual TRD_Sector TRD_Sector { get; set; }
     }
 }
