@@ -109,7 +109,7 @@ namespace apmservice
 
         public static bool SyncSectorDailyData(string sectorTypeId, astockEntities astock, DateTime startDate, DateTime? endDate)
         {
-            if (endDate != null && startDate >= endDate)
+            if (endDate != null && startDate > endDate)
             {
                 return false;
             }
@@ -126,54 +126,66 @@ namespace apmservice
                     .Select(a => a.StockId).ToList();
 
                 DateTime temp = startDate;
-                double sectorReturnRateNonReinvest = 0;
-                double sectorReturnRateReinvest = 0;
-                double sectorCirculatedMarketValue = 0;
+                
                 while(temp <= endDate)
                 {
+                    double sectorReturnRateNonReinvest = 0;
+                    double sectorReturnRateReinvest = 0;
+                    double sectorCirculatedMarketValue = 0;
+                    bool isTradeDay = false;
+
                     foreach (var stock in constituentStocks)
                     {
                         var tradeRecord = astock.STK_MKT_TradeDaily
                             .Where(a => a.StockID.Equals(stock, StringComparison.InvariantCultureIgnoreCase) && a.TradeDate2 == temp)
                             .FirstOrDefault();
 
-                        if(tradeRecord != null)
+                        if(tradeRecord == null)
                         {
-                            sectorReturnRateNonReinvest +=
-                                ((tradeRecord.SumCirculatedMarketValue == null) || (tradeRecord.ReturnRateNonReinvest == null)) ?
-                                0 :
-                                ((double)tradeRecord.SumCirculatedMarketValue * (double)tradeRecord.ReturnRateNonReinvest);
-
-                            sectorReturnRateReinvest +=
-                                ((tradeRecord.SumCirculatedMarketValue == null) || (tradeRecord.ReturnRateReinvest == null)) ?
-                                0 :
-                                ((double)tradeRecord.SumCirculatedMarketValue * (double)tradeRecord.ReturnRateReinvest);
-                            sectorCirculatedMarketValue += 
-                                tradeRecord.SumCirculatedMarketValue == null ?
-                                0 :
-                                (double)tradeRecord.SumCirculatedMarketValue;
+                            continue;
                         }
+
+                        isTradeDay = true;
+
+                        sectorReturnRateNonReinvest +=
+                            ((tradeRecord.SumCirculatedMarketValue == null) || (tradeRecord.ReturnRateNonReinvest == null)) ?
+                            0 :
+                            ((double)tradeRecord.SumCirculatedMarketValue * (double)tradeRecord.ReturnRateNonReinvest);
+
+                        sectorReturnRateReinvest +=
+                            ((tradeRecord.SumCirculatedMarketValue == null) || (tradeRecord.ReturnRateReinvest == null)) ?
+                            0 :
+                            ((double)tradeRecord.SumCirculatedMarketValue * (double)tradeRecord.ReturnRateReinvest);
+
+                        sectorCirculatedMarketValue += 
+                            tradeRecord.SumCirculatedMarketValue == null ?
+                            0 :
+                            (double)tradeRecord.SumCirculatedMarketValue;
                     }
-                    sectorReturnRateNonReinvest =
-                            sectorReturnRateNonReinvest == 0 ?
-                            0 : sectorReturnRateNonReinvest / sectorCirculatedMarketValue;
 
-                    sectorReturnRateReinvest =
-                        sectorReturnRateReinvest == 0 ?
-                        0 : sectorReturnRateReinvest / sectorCirculatedMarketValue;
-
-                    STK_MKT_SectorDaily record = new STK_MKT_SectorDaily
+                    if (isTradeDay)
                     {
-                        SectorTypeId = sectorTypeId,
-                        TradeDate = temp,
-                        CirculatedMarketValueWeightedReturnRateNonReinvest = sectorReturnRateNonReinvest,
-                        CirculatedMarketValueWeightedReturnRateReinvest = sectorReturnRateReinvest,
-                        UniqueId = Guid.NewGuid()
-                    };
+                        sectorReturnRateNonReinvest =
+                                sectorReturnRateNonReinvest == 0 ?
+                                0 : sectorReturnRateNonReinvest / sectorCirculatedMarketValue;
 
-                    astock.STK_MKT_SectorDaily.Add(record);
+                        sectorReturnRateReinvest =
+                            sectorReturnRateReinvest == 0 ?
+                            0 : sectorReturnRateReinvest / sectorCirculatedMarketValue;
 
-                    temp.AddDays(1);
+                        STK_MKT_SectorDaily record = new STK_MKT_SectorDaily
+                        {
+                            SectorTypeId = sectorTypeId,
+                            TradeDate = temp,
+                            CirculatedMarketValueWeightedReturnRateNonReinvest = sectorReturnRateNonReinvest,
+                            CirculatedMarketValueWeightedReturnRateReinvest = sectorReturnRateReinvest,
+                            UniqueId = Guid.NewGuid()
+                        };
+
+                        astock.STK_MKT_SectorDaily.Add(record);
+                    }
+
+                    temp = temp.AddDays(1);
                 }
 
                 astock.SaveChanges();
@@ -220,34 +232,125 @@ namespace apmservice
                 while(temp <= endDate)
                 {
                     var riskRecord = astock.STK_MKT_RiskFactorDaily
-                        .Where(a => a.TradingDate2 == temp && ((a.SectorBeta1 == null) || (a.SectorBeta2 == null)))
+                        .Where(a => 
+                            a.TradingDate2 == temp && 
+                            a.Symbol.Equals(stockId, StringComparison.InvariantCultureIgnoreCase) &&
+                            ((a.SectorBeta1 == null) || (a.SectorBeta2 == null)))
                         .FirstOrDefault();
 
                     if(riskRecord != null)
                     {
-                        var otherFirmsInSameSector = astock.TRD_Co
-                            .Where(a => 
-                                a.SectorTypeId.Equals(sectorTypeId, StringComparison.CurrentCultureIgnoreCase) &&
-                                !a.StockId.Equals(stockId, StringComparison.InvariantCultureIgnoreCase))
-                            .Select(a => a.StockId)
-                            .ToList();
-
                         var dateMinusOneYear = temp.AddYears(-1).Date;
-                        foreach (var firm in otherFirmsInSameSector)
-                        {
-                            var tradeRecords = astock.STK_MKT_TradeDaily
-                                .Where(a => 
-                                    a.StockID.Equals(firm, StringComparison.InvariantCultureIgnoreCase) && 
-                                    a.TradeDate2 >= dateMinusOneYear && 
-                                    a.TradeDate2 <= temp)
-                                .Select(a => new { Date = a.TradeDate2, a.SumCirculatedMarketValue, a.ReturnRateReinvest, a.ReturnRateNonReinvest })
-                                .OrderByDescending(a => a.Date).ToList();
+                        var tradeRecords = astock.STK_MKT_TradeDaily
+                            .Where(a => 
+                                a.StockID.Equals(stockId, StringComparison.InvariantCultureIgnoreCase) && 
+                                a.TradeDate2 >= dateMinusOneYear && 
+                                a.TradeDate2 <= temp)
+                            .Select(a => new { Date = a.TradeDate2, a.SumCirculatedMarketValue, a.ReturnRateReinvest, a.ReturnRateNonReinvest })
+                            .OrderByDescending(a => a.Date).ToList();
 
-                            //TODO
+                        //var averageReturnRateReinvest = tradeRecords.Average(a => a.ReturnRateReinvest);
+                        var averageReturnRateNonReinvest = tradeRecords.Average(a => a.ReturnRateNonReinvest);
+
+                        double? averageReturnRateReinvest = 1;
+                        //double? averageReturnRateNonReinvest = 1;
+                        int count = 0;
+                        foreach(var trade in tradeRecords)
+                        {
+                            //averageReturnRateNonReinvest = (1 + trade.ReturnRateNonReinvest) * averageReturnRateNonReinvest;
+                            averageReturnRateReinvest = (1 + trade.ReturnRateReinvest) * averageReturnRateReinvest; 
+                            ++count;
                         }
+
+                        if(count > 0)
+                        {
+                            //averageReturnRateNonReinvest = Math.Pow((double)averageReturnRateNonReinvest, 1d / count) - 1;
+                            averageReturnRateReinvest = Math.Pow((double)averageReturnRateReinvest, 1d / count) - 1;
+                        }
+                        else
+                        {
+                            //averageReturnRateNonReinvest = 0;
+                            averageReturnRateReinvest = 0;
+                        }
+
+                        var sectorRecords = astock.STK_MKT_SectorDaily
+                            .Where(a =>
+                                a.SectorTypeId.Equals(sectorTypeId, StringComparison.InvariantCultureIgnoreCase) &&
+                                a.TradeDate >= dateMinusOneYear &&
+                                a.TradeDate <= temp)
+                            .Select(a => new { a.TradeDate, a.CirculatedMarketValueWeightedReturnRateNonReinvest, a.CirculatedMarketValueWeightedReturnRateReinvest })
+                            .OrderByDescending(a => a.TradeDate).ToList();
+
+                        double? averageSectorReturnRateReinvest = 1;
+                        //double? averageSectorReturnRateNonReinvest = 1;
+                        count = 0;
+                        foreach (var trade in sectorRecords)
+                        {
+                            averageSectorReturnRateReinvest = (1 + trade.CirculatedMarketValueWeightedReturnRateReinvest) * averageSectorReturnRateReinvest;
+                            //averageSectorReturnRateNonReinvest = (1 + trade.CirculatedMarketValueWeightedReturnRateNonReinvest) * averageReturnRateNonReinvest;
+                            ++count;
+                        }
+
+                        if (count > 0)
+                        {
+                            averageSectorReturnRateReinvest = Math.Pow((double)averageSectorReturnRateReinvest, 1d / count) - 1;
+                            //averageSectorReturnRateNonReinvest = Math.Pow((double)averageSectorReturnRateNonReinvest, 1d / count) - 1;
+                        }
+                        else
+                        {
+                            averageSectorReturnRateReinvest = 0;
+                            //averageSectorReturnRateNonReinvest = 0;
+                        }
+
+                        //var averageSectorReturnRateReinvest = sectorRecords.Average(a => a.CirculatedMarketValueWeightedReturnRateReinvest);
+                        var averageSectorReturnRateNonReinvest = sectorRecords.Average(a => a.CirculatedMarketValueWeightedReturnRateNonReinvest);
+
+                        double? beta1 = 0;
+                        double? beta2 = 0;
+                        double? denominator1 = 0;
+                        double? denominator2 = 0;
+
+                        foreach(var trade in tradeRecords)
+                        {
+                            var sectorTrade = sectorRecords.Where(a => a.TradeDate == trade.Date).FirstOrDefault();
+                            if(sectorTrade != null)
+                            {
+                                beta1 +=
+                                    (trade.ReturnRateReinvest - averageReturnRateReinvest) *
+                                    (sectorTrade.CirculatedMarketValueWeightedReturnRateReinvest - averageSectorReturnRateReinvest);
+
+                                beta2 +=
+                                    (trade.ReturnRateNonReinvest - averageReturnRateNonReinvest) *
+                                    (sectorTrade.CirculatedMarketValueWeightedReturnRateNonReinvest - averageSectorReturnRateNonReinvest);
+
+                                denominator1 +=
+                                    (sectorTrade.CirculatedMarketValueWeightedReturnRateReinvest - averageSectorReturnRateReinvest) *
+                                    (sectorTrade.CirculatedMarketValueWeightedReturnRateReinvest - averageSectorReturnRateReinvest);
+
+                                denominator2 +=
+                                    (sectorTrade.CirculatedMarketValueWeightedReturnRateNonReinvest - averageSectorReturnRateNonReinvest) *
+                                    (sectorTrade.CirculatedMarketValueWeightedReturnRateNonReinvest - averageSectorReturnRateNonReinvest);
+                            }
+                        }
+
+                        beta1 =
+                            denominator1 == null ?
+                            0 :
+                            ((double)denominator1 == 0 ? 0 : beta1 / denominator1);
+
+                        beta2 =
+                            denominator2 == null ?
+                            0 :
+                            ((double)denominator2 == 0 ? 0 : beta2 / denominator2);
+
+                        riskRecord.SectorBeta1 = beta1;
+                        riskRecord.SectorBeta2 = beta2;
+#if(!DEBUG)
+                        astock.SaveChanges();
+#endif
                     }
 
-                    temp.AddDays(1);
+                    temp = temp.AddDays(1);
                 }
             }
             catch(Exception ex)

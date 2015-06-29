@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Runtime.Remoting.Messaging;
 
 namespace apmservice.Events
 {
@@ -17,5 +18,18 @@ namespace apmservice.Events
         }
 
         public delegate bool ModelGenerateEventHandler(object sender, ModelGenerateEventArgs e);
+
+        public static void ModelGenerateTaskFinished(IAsyncResult result)
+        {
+            lock(_endInvokeLock)
+            {
+                AsyncResult asyncResult = (AsyncResult)result;
+
+                ModelGenerateEventHandler handler = (ModelGenerateEventHandler)asyncResult.AsyncDelegate;
+                bool b = handler.EndInvoke(result);
+            }
+        }
+
+        private static object _endInvokeLock = new object();
     }
 }

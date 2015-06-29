@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Data;
 using System.Diagnostics;
@@ -155,32 +156,35 @@ namespace apmservice
                             key.Close();
                         }
                     }
-
-                    // Set timer for market index data synchronization
-                    if(_isCreateSyncMarketIndexDataJob)
-                    {
-                        Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
-                        syncMktIdxDataThread.Start();
-                    }
-
-                    // Set timer for trade data synchronization
-                    if(_isCreateSyncDailyTradeDataJob)
-                    {
-                        Thread syncTradeDataThread = new Thread(new ThreadStart(KickOffSyncTradeData));
-                        syncTradeDataThread.Start();
-                    }
-
-                    // Set timer for sector constituent stocks synchronization
-                    if(_isCreateSyncSectorConstituentStocksJob)
-                    {
-                        Thread syncSectorConstituentStocksThread = new Thread(new ThreadStart(KickOffSyncSectorConstituentStocks));
-                        syncSectorConstituentStocksThread.Start();
-                    }
-
-                    // Set timer for generate portfolio
-                    Thread genPortfolioThread = new Thread(new ThreadStart(KickOffGenPortfolio));
-                    genPortfolioThread.Start();
                 }
+            }
+
+            // Set timer for market index data synchronization
+            if (_isCreateSyncMarketIndexDataJob)
+            {
+                Thread syncMktIdxDataThread = new Thread(new ThreadStart(KickOffSyncMktIdxData));
+                syncMktIdxDataThread.Start();
+            }
+
+            // Set timer for trade data synchronization
+            if (_isCreateSyncDailyTradeDataJob)
+            {
+                Thread syncTradeDataThread = new Thread(new ThreadStart(KickOffSyncTradeData));
+                syncTradeDataThread.Start();
+            }
+
+            // Set timer for sector constituent stocks synchronization
+            if (_isCreateSyncSectorConstituentStocksJob)
+            {
+                Thread syncSectorConstituentStocksThread = new Thread(new ThreadStart(KickOffSyncSectorConstituentStocks));
+                syncSectorConstituentStocksThread.Start();
+            }
+
+            if (_providers.Count() > 0)
+            {
+                // Set timer for generate portfolio
+                Thread genPortfolioThread = new Thread(new ThreadStart(KickOffGenPortfolio));
+                genPortfolioThread.Start();
             }
 
             eventLog1.WriteEntry("Active Portfolio Management Service Started!", EventLogEntryType.Information);
@@ -242,27 +246,79 @@ namespace apmservice
                             InvokeArgs = null
                         };
 
-                    try
+                    var delegates = GeneratePortfolio.GetInvocationList();
+                    List<IAsyncResult> waits = new List<IAsyncResult>();
+                    //Dictionary<ModelGenerateEvent.ModelGenerateEventHandler, IAsyncResult> dic = new Dictionary<ModelGenerateEvent.ModelGenerateEventHandler, IAsyncResult>();
+                    foreach (ModelGenerateEvent.ModelGenerateEventHandler handler in delegates)
                     {
-                        GeneratePortfolio.Invoke(this, args);
-                    }
-                    catch(Exception ex)
-                    {
-                        eventLog1.WriteEntry(
-                            string.Format(
-                            "Unexpected error encountered when attempting to call method '{0}' in class '{1}' in assembly '{2}'.\nDetails = {3}",
-                            args.MethodName, args.ClassName, GeneratePortfolio.Target.ToString(), ex.Message),
-                            EventLogEntryType.Error);
-                    }
-                    finally
-                    {
-                        tasks.RemoveAll(a => a.Status == TaskStatus.RanToCompletion);
+                        try
+                        {
+                            waits.Add(handler.BeginInvoke(this, args, null, null));
+                            //dic.Add(handler, handler.BeginInvoke(this, args, null, null));
+                        }
+                        catch(Exception ex)
+                        {
+                            eventLog1.WriteEntry(
+                                string.Format(
+                                "Unexpected error encountered when attempting to call method '{0}' in class '{1}' in assembly '{2}'.\nDetails = {3}",
+                                handler.Method.Name, handler.GetType().ToString(), handler.Target.ToString(), ex.Message),
+                                EventLogEntryType.Error);
+                        }
 
-                        _isExistingGenPortfolioJob = false;
-                        _isExistingMarketIndexDataSyncJob = false;
-                        _isExistingDailyTradeDataSyncJob = false;
-                        _isExistingSectorConstituentStocksSyncJob = false;
+                        continue;
                     }
+
+                    //foreach(var entry in dic)
+                    //{
+                    //    try
+                    //    {
+                    //        entry.Key.EndInvoke(entry.Value);
+                    //    }
+                    //    catch(Exception ex)
+                    //    {
+                    //        eventLog1.WriteEntry(
+                    //            string.Format(
+                    //            "Unexpected error encountered when attempting to wait on async call on method '{0}' in class '{1}' in assembly '{2}'.\nDetails = {3}",
+                    //            entry.Key.Method.Name, entry.Key.GetType().ToString(), entry.Key.Target.ToString(), ex.Message),
+                    //            EventLogEntryType.Error);
+                    //    }
+
+                    //    continue;
+                    //}
+
+                    foreach(var ar in waits)
+                    {
+                        try
+                        {
+                            ar.AsyncWaitHandle.WaitOne();
+                            
+                        }
+                        catch(Exception ex)
+                        {
+                            eventLog1.WriteEntry(
+                                string.Format(
+                                "Unexpected error encountered when attempting to wait on handle '{0}' to complete.\nDetails = {1}",
+                                ar.AsyncWaitHandle.GetType().ToString(), ex.Message),
+                                EventLogEntryType.Error);
+                        }
+
+                        continue;
+                    }
+
+                    //GeneratePortfolio.Invoke(this, args);
+                    
+                    Task temp;
+                    while(tasks.TryTake(out temp))
+                    {
+                        // Do nothing
+                    }
+
+                    // Set the flags
+                    _isExistingGenPortfolioJob = false;
+                    _isExistingMarketIndexDataSyncJob = false;
+                    _isExistingDailyTradeDataSyncJob = false;
+                    _isExistingSectorConstituentStocksSyncJob = false;
+
                 }
             }
         }
@@ -314,21 +370,56 @@ namespace apmservice
                 var existingData =
                     _astock.STK_MKT_SectorDaily
                     .Where(a => a.SectorTypeId.Equals(sector, StringComparison.InvariantCultureIgnoreCase))
-                    .Select(a => a.TradeDate).OrderByDescending(a => a).ToList();
+                    .Select(a => a.TradeDate)
+                    .OrderByDescending(a => a).ToList();
 
-                if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
+                DateTime? startDate1 = _defaultStartDate;
+                DateTime? endDate2 = DateTime.Now.Date;
+                DateTime? startDate2 = null;
+                DateTime? endDate1 = null;
+
+                if(existingData.Count != 0)
                 {
-                    continue;
+                    var MinDate = existingData.Min(a => a);
+                    var MaxDate = existingData.Max(a => a);
+                    if(MinDate <= _defaultStartDate || MaxDate >= DateTime.Now.Date)
+                    {
+                        continue;
+                    }
+
+                    startDate2 = ((DateTime)MaxDate).AddDays(1);
+                    endDate1 = ((DateTime)MinDate).AddDays(-1);
+                }
+                else
+                {
+                    startDate2 = startDate1;
+                    endDate1 = endDate2;
                 }
 
-                DateTime nextDay =
-                    existingData.Count == 0 ?
-                        _defaultStartDate :
-                        ((DateTime)existingData.ElementAt(0)).AddDays(1);
+                //if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
+                //{
+                //    continue;
+                //}
 
-                if (!Util.SyncSectorDailyData(sector, _astock, nextDay, null))
+                //DateTime nextDay =
+                //    existingData.Count == 0 ?
+                //        _defaultStartDate :
+                //        ((DateTime)existingData.ElementAt(0)).AddDays(1);
+
+                if(existingData.Count == 0)
                 {
-                    continue;
+                    if (!Util.SyncSectorDailyData(sector, _astock, (DateTime)startDate1, endDate1))
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    if (!Util.SyncSectorDailyData(sector, _astock, (DateTime)startDate1, endDate1) && 
+                        !!Util.SyncSectorDailyData(sector, _astock, (DateTime)startDate2, endDate2))
+                    {
+                        continue;
+                    }
                 }
             }
 
@@ -338,7 +429,10 @@ namespace apmservice
             {
                 var existingData =
                     _astock.STK_MKT_RiskFactorDaily
-                    .Where(a => a.Symbol.Equals(firm.StockId, StringComparison.InvariantCultureIgnoreCase) && a.SectorBeta1 != null && a.SectorBeta2 != null)
+                    .Where(a => 
+                        a.Symbol.Equals(firm.StockId, StringComparison.InvariantCultureIgnoreCase) && 
+                        a.SectorBeta1 != null && 
+                        a.SectorBeta2 != null)
                     .Select(a => a.TradingDate2).OrderByDescending(a => a).ToList();
 
                 if (existingData.Count != 0 && ((DateTime)existingData.ElementAt(0)).Date >= DateTime.Now.Date)
@@ -445,7 +539,7 @@ namespace apmservice
         private string[] _providers;
         private event ModelGenerateEvent.ModelGenerateEventHandler GeneratePortfolio;
         private static List<AppDomain> domains = new List<AppDomain>();
-        private static List<Task> tasks = new List<Task>();
+        private static ConcurrentBag<Task> tasks = new ConcurrentBag<Task>();
         private static bool _isExistingMarketIndexDataSyncJob = false;
         private static bool _isExistingDailyTradeDataSyncJob = false;
         private static bool _isExistingSectorConstituentStocksSyncJob = false;
