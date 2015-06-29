@@ -39,6 +39,7 @@
             // 
             // serviceInstaller1
             // 
+            this.serviceInstaller1.Description = "Periodically generates the portfolio based on various model algorithms";
             this.serviceInstaller1.DisplayName = "Active Portfolio Management";
             this.serviceInstaller1.ServiceName = "Active Portfolio Management";
             // 
